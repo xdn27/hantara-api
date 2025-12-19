@@ -2,6 +2,7 @@ import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { authMiddleware } from './middleware/auth';
 import { sendRoute } from './routes/send';
+import { eventsRoute } from './routes/events';
 
 const app = new Elysia()
   .use(cors())
@@ -20,6 +21,7 @@ const app = new Elysia()
           : null,
       }))
       .use(sendRoute)
+      .use(eventsRoute)
   )
   .listen(3001);
 
