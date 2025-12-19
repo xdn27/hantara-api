@@ -37,7 +37,7 @@ export interface AuthContext {
  */
 export const authMiddleware = new Elysia({ name: 'auth' })
   .state('auth', null as AuthContext | null)
-  .onBeforeHandle(async ({ headers, set, store }) => {
+  .onBeforeHandle({ as: 'scoped' }, async ({ headers, set, store }) => {
     const authHeader = headers.authorization;
 
     // Check for Authorization header
@@ -148,6 +148,10 @@ export const authMiddleware = new Elysia({ name: 'auth' })
               emailUsed: billingRecord.emailUsed,
             }
           : null,
+      };
+
+      return {
+        auth: store.auth,
       };
 
       // Continue to next handler (don't return anything)
