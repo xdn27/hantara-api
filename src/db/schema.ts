@@ -184,6 +184,30 @@ export const webhookLog = pgTable('webhook_log', {
 	createdAt: timestamp('created_at', { mode: 'date' }).notNull().$defaultFn(() => new Date())
 });
 
+export const emailQueue = pgTable('email_queue', {
+	id: varchar('id', { length: 255 }).primaryKey(),
+	userId: varchar('user_id', { length: 255 }).notNull().references(() => user.id),
+	domainId: varchar('domain_id', { length: 255 }).notNull().references(() => domain.id),
+	fromEmail: varchar('from_email', { length: 255 }).notNull(),
+	toEmails: text('to_emails').notNull(), // JSON array
+	subject: varchar('subject', { length: 500 }).notNull(),
+	htmlContent: text('html_content'),
+	textContent: text('text_content'),
+	templateId: varchar('template_id', { length: 255 }).references(() => emailTemplate.id),
+	variables: text('variables'), // JSON
+	headers: text('headers'), // JSON
+	status: varchar('status', { length: 20 }).notNull().default('pending'), // pending, queued, sent, failed
+	messageId: varchar('message_id', { length: 255 }),
+	errorMessage: text('error_message'),
+	scheduledAt: timestamp('scheduled_at', { mode: 'date' }),
+	createdAt: timestamp('created_at', { mode: 'date' }).notNull().$defaultFn(() => new Date()),
+	sentAt: timestamp('sent_at', { mode: 'date' })
+}, (table) => ({
+	userIdx: index('email_queue_user_idx').on(table.userId),
+	domainIdx: index('email_queue_domain_idx').on(table.domainId),
+	statusIdx: index('email_queue_status_idx').on(table.status)
+}));
+
 export const passwordResetToken = pgTable('password_reset_token', {
 	id: varchar('id', { length: 255 }).primaryKey(),
 	userId: varchar('user_id', { length: 255 }).notNull().references(() => user.id),
@@ -299,7 +323,8 @@ export const userRelations = relations(user, ({ many }) => ({
 	webhookLogs: many(webhookLog),
 	passwordResetTokens: many(passwordResetToken),
 	userBillings: many(userBilling),
-	notifications: many(notification)
+	notifications: many(notification),
+	emailQueues: many(emailQueue)
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -344,7 +369,8 @@ export const domainRelations = relations(domain, ({ one, many }) => ({
 	}),
 	smtpCredentials: many(smtpCredential),
 	apiKeys: many(domainApiKey),
-	webhooks: many(domainWebhook)
+	webhooks: many(domainWebhook),
+	emailQueues: many(emailQueue)
 }));
 
 export const smtpCredentialRelations = relations(smtpCredential, ({ one }) => ({
@@ -402,6 +428,21 @@ export const webhookLogRelations = relations(webhookLog, ({ one }) => ({
 	user: one(user, {
 		fields: [webhookLog.userId],
 		references: [user.id]
+	})
+}));
+
+export const emailQueueRelations = relations(emailQueue, ({ one }) => ({
+	user: one(user, {
+		fields: [emailQueue.userId],
+		references: [user.id]
+	}),
+	domain: one(domain, {
+		fields: [emailQueue.domainId],
+		references: [domain.id]
+	}),
+	template: one(emailTemplate, {
+		fields: [emailQueue.templateId],
+		references: [emailTemplate.id]
 	})
 }));
 
@@ -495,6 +536,7 @@ export type PaymentMethod = typeof paymentMethod.$inferSelect;
 export type UserBilling = typeof userBilling.$inferSelect;
 export type Invoice = typeof invoice.$inferSelect;
 export type Payment = typeof payment.$inferSelect;
+export type EmailQueue = typeof emailQueue.$inferSelect;
 
 // Insert types for convenience
 export type NewUser = typeof user.$inferInsert;
@@ -515,6 +557,7 @@ export type NewPaymentMethod = typeof paymentMethod.$inferInsert;
 export type NewUserBilling = typeof userBilling.$inferInsert;
 export type NewInvoice = typeof invoice.$inferInsert;
 export type NewPayment = typeof payment.$inferInsert;
+export type NewEmailQueue = typeof emailQueue.$inferInsert;
 
 export const notification = pgTable('notification', {
 	id: varchar('id', { length: 255 }).primaryKey(),
