@@ -1,8 +1,9 @@
 import { Elysia, t } from 'elysia';
 import { eq, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
-import { db, emailEvent, userBilling, emailTemplate, emailTemplateVariable } from '../db';
+import { db, emailEvent, userBilling } from '../db';
 import { authMiddleware, type AuthContext } from '../middleware/auth';
+import { addEmailJob, type EmailJobData } from '../queues';
 
 // Email address regex for validation
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -95,8 +96,6 @@ export const sendRoute = new Elysia({ name: 'send-route' })
     '/send',
     async ({ auth, body, set }) => {
       // Type guard for auth (should never fail due to middleware)
-
-      console.log(auth);
       if (!auth) {
         set.status = 401;
         return { error: 'Unauthorized', message: 'Authentication required' };
@@ -127,12 +126,12 @@ export const sendRoute = new Elysia({ name: 'send-route' })
       const recipients = Array.isArray(to) ? to : [to];
       
       // Validate all recipient addresses
-      for (const recipient of recipients) {
-        if (!parseEmailAddress(recipient)) {
-          set.status = 400;
-          return { error: 'Bad Request', message: `Invalid recipient email: ${recipient}` };
-        }
-      }
+    //   for (const recipient of recipients) {
+    //     if (!parseEmailAddress(recipient)) {
+    //       set.status = 400;
+    //       return { error: 'Bad Request', message: `Invalid recipient email: ${recipient}` };
+    //     }
+    //   }
 
       // Check rate limit
       if (auth.billing) {
@@ -176,29 +175,30 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         return { error: 'Bad Request', message: 'Either html or text content is required' };
       }
 
-      // Generate message ID
+      // Generate IDs
+      const jobId = nanoid();
       const messageId = `<${nanoid()}@${auth.domain.name}>`;
 
-      // TODO: Add to BullMQ queue for async processing
-      // For now, we'll just create the email event and return success
-      // The actual SMTP sending will be done by the worker
+      // Parse all recipient addresses
+      const recipientAddresses = recipients.map(r => r);
 
-      // Create email event for each recipient
+      // Create email event for each recipient (status: queued)
       const eventIds: string[] = [];
-      for (const recipient of recipients) {
+      for (const recipientAddr of recipientAddresses) {
         const eventId = nanoid();
         await db.insert(emailEvent).values({
           id: eventId,
           userId: auth.user.id,
           messageId,
           eventType: 'queued',
-          recipientEmail: parseEmailAddress(recipient)!.address,
+          recipientEmail: recipientAddr,
           subject: emailSubject,
           metadata: JSON.stringify({
             from: fromParsed,
             replyTo,
             headers,
             templateId,
+            jobId,
           }),
         });
         eventIds.push(eventId);
@@ -214,8 +214,31 @@ export const sendRoute = new Elysia({ name: 'send-route' })
           .where(eq(userBilling.id, auth.billing.id));
       }
 
+      // Create job data
+      const jobData: EmailJobData = {
+        jobId,
+        userId: auth.user.id,
+        domainId: auth.domain.id,
+        domainName: auth.domain.name,
+        apiKeyId: auth.apiKey.id,
+        messageId,
+        from: fromParsed,
+        to: recipientAddresses,
+        subject: emailSubject!,
+        html: emailHtml,
+        text: emailText,
+        replyTo,
+        headers,
+        templateId,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Add job to BullMQ queue
+      await addEmailJob(jobData);
+
       return {
         success: true,
+        jobId,
         messageId,
         recipients: recipients.length,
         status: 'queued',

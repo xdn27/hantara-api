@@ -21,7 +21,7 @@ export const config = {
 
   haraka: {
     host: getEnv('HARAKA_HOST', 'localhost'),
-    port: parseInt(getEnv('HARAKA_PORT', '587')),
+    port: parseInt(getEnv('HARAKA_PORT', '2525')),
   },
 
   // For HMAC signature on webhooks
