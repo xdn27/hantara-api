@@ -8,6 +8,8 @@
     "worker:dev": "bun run --watch src/worker.ts"
   },
   "dependencies": {
+    "@bull-board/api": "^6.15.0",
+    "@bull-board/elysia": "^6.15.0",
     "@elysiajs/cors": "^1.4.0",
     "@types/nodemailer": "^7.0.4",
     "bullmq": "^5.66.1",

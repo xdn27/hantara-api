@@ -3,11 +3,14 @@ import { cors } from '@elysiajs/cors';
 import { authMiddleware } from './middleware/auth';
 import { sendRoute } from './routes/send';
 import { eventsRoute } from './routes/events';
+import { adminQueueRoute } from './routes/admin/queues';
 
 const app = new Elysia()
   .use(cors())
   // Health check (public)
   .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+  // Admin routes (Bull Board UI)
+  .use(adminQueueRoute)
   // Protected API routes
   .group('/api/v1', (app) =>
     app
