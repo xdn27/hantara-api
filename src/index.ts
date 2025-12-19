@@ -1,12 +1,13 @@
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { authMiddleware } from './middleware/auth';
+import { sendRoute } from './routes/send';
 
 const app = new Elysia()
   .use(cors())
   // Health check (public)
   .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))
-  // Protected test endpoint
+  // Protected API routes
   .group('/api/v1', (app) =>
     app
       .use(authMiddleware)
@@ -18,6 +19,7 @@ const app = new Elysia()
           ? { emailLimit: auth.billing.emailLimit, emailUsed: auth.billing.emailUsed }
           : null,
       }))
+      .use(sendRoute)
   )
   .listen(3001);
 

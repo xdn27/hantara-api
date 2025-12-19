@@ -150,10 +150,6 @@ export const authMiddleware = new Elysia({ name: 'auth' })
           : null,
       };
 
-      return {
-        auth: store.auth,
-      };
-
       // Continue to next handler (don't return anything)
     } catch (err) {
       console.error('Auth middleware error:', err);
@@ -164,7 +160,7 @@ export const authMiddleware = new Elysia({ name: 'auth' })
       };
     }
   })
-  .derive(({ store }) => ({
+  .derive({ as: 'scoped' }, ({ store }) => ({
     // Expose auth context directly on the request
     auth: store.auth as AuthContext,
   }));
