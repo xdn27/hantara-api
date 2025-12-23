@@ -24,6 +24,14 @@ export const config = {
     port: parseInt(getEnv('HARAKA_PORT', '2525')),
   },
 
+  tracking: {
+    // Base URL for tracking endpoints (e.g., https://track.yourdomain.com or http://localhost:3001)
+    baseUrl: getEnv('TRACKING_BASE_URL', 'http://localhost:3001'),
+    // Enable/disable tracking features
+    enableOpenTracking: getEnv('ENABLE_OPEN_TRACKING', 'true') === 'true',
+    enableClickTracking: getEnv('ENABLE_CLICK_TRACKING', 'true') === 'true',
+  },
+
   // For HMAC signature on webhooks
   webhookSecret: getEnv('WEBHOOK_SECRET', 'default-webhook-secret'),
 };

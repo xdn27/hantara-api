@@ -4,6 +4,7 @@ import { authMiddleware } from './middleware/auth';
 import { sendRoute } from './routes/send';
 import { eventsRoute } from './routes/events';
 import { adminQueueRoute } from './routes/admin/queues';
+import { trackingRoute } from './routes/tracking';
 
 const app = new Elysia()
   .use(cors())
@@ -11,7 +12,8 @@ const app = new Elysia()
   .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))
   // Admin routes (Bull Board UI)
   .use(adminQueueRoute)
-  // Protected API routes
+  // Public tracking routes (no auth required)
+  .use(trackingRoute)
   .group('/api/v1', (app) =>
     app
       .use(authMiddleware)

@@ -158,6 +158,7 @@ export const emailEvent = pgTable('email_event', {
 	messageId: varchar('message_id', { length: 255 }).notNull(), // Email message identifier
 	eventType: varchar('event_type', { length: 50 }).notNull(), // sent, delivered, opened, clicked, bounced, complained, unsubscribed
 	recipientEmail: varchar('recipient_email', { length: 255 }).notNull(),
+	sendingDomain: varchar('sending_domain', { length: 255 }), // Domain used to send the email
 	subject: varchar('subject', { length: 500 }),
 	templateId: varchar('template_id', { length: 255 }).references(() => emailTemplate.id),
 	templateName: varchar('template_name', { length: 100 }),
@@ -165,7 +166,12 @@ export const emailEvent = pgTable('email_event', {
 	ipAddress: varchar('ip_address', { length: 45 }),
 	userAgent: varchar('user_agent', { length: 500 }),
 	createdAt: timestamp('created_at', { mode: 'date' }).notNull().$defaultFn(() => new Date())
-});
+}, (table) => ({
+	userIdx: index('email_event_user_idx').on(table.userId),
+	messageIdx: index('email_event_message_idx').on(table.messageId),
+	domainIdx: index('email_event_domain_idx').on(table.sendingDomain),
+	eventTypeIdx: index('email_event_type_idx').on(table.eventType)
+}));
 
 export const webhookLog = pgTable('webhook_log', {
 	id: varchar('id', { length: 255 }).primaryKey(),
@@ -558,6 +564,58 @@ export type NewUserBilling = typeof userBilling.$inferInsert;
 export type NewInvoice = typeof invoice.$inferInsert;
 export type NewPayment = typeof payment.$inferInsert;
 export type NewEmailQueue = typeof emailQueue.$inferInsert;
+
+// ============================================
+// Email Tracking Tables
+// ============================================
+
+export const emailTrackingLink = pgTable('email_tracking_link', {
+	id: varchar('id', { length: 255 }).primaryKey(),
+	userId: varchar('user_id', { length: 255 }).notNull().references(() => user.id),
+	messageId: varchar('message_id', { length: 255 }).notNull(),
+	recipientEmail: varchar('recipient_email', { length: 255 }).notNull(),
+	sendingDomain: varchar('sending_domain', { length: 255 }),
+	originalUrl: text('original_url').notNull(),
+	clickedAt: timestamp('clicked_at', { mode: 'date' }),
+	clickCount: integer('click_count').default(0),
+	createdAt: timestamp('created_at', { mode: 'date' }).notNull().$defaultFn(() => new Date())
+}, (table) => ({
+	messageIdx: index('email_tracking_link_message_idx').on(table.messageId),
+	userIdx: index('email_tracking_link_user_idx').on(table.userId)
+}));
+
+export const emailTrackingOpen = pgTable('email_tracking_open', {
+	id: varchar('id', { length: 255 }).primaryKey(),
+	userId: varchar('user_id', { length: 255 }).notNull().references(() => user.id),
+	messageId: varchar('message_id', { length: 255 }).notNull(),
+	recipientEmail: varchar('recipient_email', { length: 255 }).notNull(),
+	sendingDomain: varchar('sending_domain', { length: 255 }),
+	openedAt: timestamp('opened_at', { mode: 'date' }),
+	openCount: integer('open_count').default(0),
+	createdAt: timestamp('created_at', { mode: 'date' }).notNull().$defaultFn(() => new Date())
+}, (table) => ({
+	messageIdx: index('email_tracking_open_message_idx').on(table.messageId),
+	userIdx: index('email_tracking_open_user_idx').on(table.userId)
+}));
+
+export const emailTrackingLinkRelations = relations(emailTrackingLink, ({ one }) => ({
+	user: one(user, {
+		fields: [emailTrackingLink.userId],
+		references: [user.id]
+	})
+}));
+
+export const emailTrackingOpenRelations = relations(emailTrackingOpen, ({ one }) => ({
+	user: one(user, {
+		fields: [emailTrackingOpen.userId],
+		references: [user.id]
+	})
+}));
+
+export type EmailTrackingLink = typeof emailTrackingLink.$inferSelect;
+export type NewEmailTrackingLink = typeof emailTrackingLink.$inferInsert;
+export type EmailTrackingOpen = typeof emailTrackingOpen.$inferSelect;
+export type NewEmailTrackingOpen = typeof emailTrackingOpen.$inferInsert;
 
 export const notification = pgTable('notification', {
 	id: varchar('id', { length: 255 }).primaryKey(),

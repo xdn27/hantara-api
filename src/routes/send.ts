@@ -1,9 +1,11 @@
 import { Elysia, t } from 'elysia';
 import { eq, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
-import { db, emailEvent, userBilling } from '../db';
+import { db, emailEvent, userBilling, emailTrackingLink, emailTrackingOpen } from '../db';
 import { authMiddleware, type AuthContext } from '../middleware/auth';
 import { addEmailJob, type EmailJobData } from '../queues';
+import { applyEmailTracking, type LinkTrackingData } from '../lib/tracking';
+import { config } from '../config';
 
 // Email address regex for validation
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -101,7 +103,7 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         return { error: 'Unauthorized', message: 'Authentication required' };
       }
 
-      const { from, to, subject, html, text, templateId, variables, headers, replyTo } = body;
+      const { from, to, subject, html, text, templateId, variables, headers, replyTo, disableTracking } = body;
 
       console.log(body);
 
@@ -179,6 +181,22 @@ export const sendRoute = new Elysia({ name: 'send-route' })
       const jobId = nanoid();
       const messageId = `<${nanoid()}@${auth.domain.name}>`;
 
+      // Apply email tracking (link wrapping + open pixel)
+      let trackingData: {
+        modifiedHtml: string;
+        openTrackingId: string;
+        links: LinkTrackingData[];
+      } | null = null;
+
+      const shouldTrack = !disableTracking && emailHtml && (
+        config.tracking.enableOpenTracking || config.tracking.enableClickTracking
+      );
+
+      if (shouldTrack && emailHtml) {
+        trackingData = applyEmailTracking(config.tracking.baseUrl, emailHtml);
+        emailHtml = trackingData.modifiedHtml;
+      }
+
       // Parse all recipient addresses
       const recipientAddresses = recipients.map(r => r);
 
@@ -192,6 +210,7 @@ export const sendRoute = new Elysia({ name: 'send-route' })
           messageId,
           eventType: 'queued',
           recipientEmail: recipientAddr,
+          sendingDomain: auth.domain.name,
           subject: emailSubject,
           metadata: JSON.stringify({
             from: fromParsed,
@@ -202,6 +221,34 @@ export const sendRoute = new Elysia({ name: 'send-route' })
           }),
         });
         eventIds.push(eventId);
+
+        // Create tracking records for this recipient
+        if (trackingData) {
+          // Open tracking record
+          if (config.tracking.enableOpenTracking) {
+            await db.insert(emailTrackingOpen).values({
+              id: `${trackingData.openTrackingId}_${nanoid(8)}`,
+              userId: auth.user.id,
+              messageId,
+              recipientEmail: recipientAddr,
+              sendingDomain: auth.domain.name,
+            });
+          }
+
+          // Link tracking records (only need to create once per unique link)
+          if (config.tracking.enableClickTracking && recipientAddresses.indexOf(recipientAddr) === 0) {
+            for (const link of trackingData.links) {
+              await db.insert(emailTrackingLink).values({
+                id: link.trackingId,
+                userId: auth.user.id,
+                messageId,
+                recipientEmail: recipientAddr, // First recipient as reference
+                sendingDomain: auth.domain.name,
+                originalUrl: link.originalUrl,
+              });
+            }
+          }
+        }
       }
 
       // Increment email used counter
@@ -255,6 +302,7 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         variables: t.Optional(t.Record(t.String(), t.String())),
         headers: t.Optional(t.Record(t.String(), t.String())),
         replyTo: t.Optional(t.String()),
+        disableTracking: t.Optional(t.Boolean()),
       }),
       detail: {
         summary: 'Send Email',
