@@ -41,18 +41,53 @@ function extractDomain(email: string): string | null {
   return parts.length === 2 ? parts[1].toLowerCase() : null;
 }
 
+// Parse variables from string (form-data) or object (JSON)
+function parseVariables(variables: string | Record<string, string> | undefined): Record<string, string> {
+  if (!variables) return {};
+  
+  // If already an object, return as-is
+  if (typeof variables === 'object') return variables;
+  
+  // If string, try to parse as JSON
+  if (typeof variables === 'string') {
+    try {
+      const parsed = JSON.parse(variables);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed;
+      }
+    } catch {
+      // Invalid JSON, return empty
+      console.warn('Invalid variables JSON string:', variables);
+    }
+  }
+  
+  return {};
+}
+
 // Render template with variables
+// templateIdOrSlug can be either UUID or user-defined slug
 async function renderTemplate(
-  templateId: string,
+  templateIdOrSlug: string,
   userId: string,
   variables: Record<string, string> = {}
-): Promise<{ subject: string; html: string; text?: string } | null> {
-  const template = await db.query.emailTemplate.findFirst({
-    where: (t, { and, eq }) => and(eq(t.id, templateId), eq(t.userId, userId)),
+): Promise<{ subject: string; html: string; text?: string; templateId: string } | null> {
+  // First try to find by ID
+  let template = await db.query.emailTemplate.findFirst({
+    where: (t, { and, eq }) => and(eq(t.id, templateIdOrSlug), eq(t.userId, userId), eq(t.isActive, true)),
     with: {
       variables: true,
     },
   });
+
+  // If not found by ID, try to find by slug
+  if (!template) {
+    template = await db.query.emailTemplate.findFirst({
+      where: (t, { and, eq }) => and(eq(t.slug, templateIdOrSlug), eq(t.userId, userId), eq(t.isActive, true)),
+      with: {
+        variables: true,
+      },
+    });
+  }
 
   if (!template) return null;
 
@@ -88,7 +123,7 @@ async function renderTemplate(
     }
   }
 
-  return { subject, html };
+  return { subject, html, templateId: template.id };
 }
 
 // Send route plugin
@@ -103,9 +138,12 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         return { error: 'Unauthorized', message: 'Authentication required' };
       }
 
-      const { from, to, subject, html, text, templateId, variables, headers, replyTo, disableTracking } = body;
+      const { from, to, subject, html, text, templateId, variables: rawVariables, headers, replyTo, disableTracking } = body;
+      
+      // Parse variables (handles both JSON string from form-data and object from JSON body)
+      const variables = parseVariables(rawVariables);
 
-      console.log(body);
+      console.log('Request body:', { ...body, variables });
 
       // Parse FROM address
       const fromParsed = parseEmailAddress(from);
@@ -299,7 +337,7 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         html: t.Optional(t.String()),
         text: t.Optional(t.String()),
         templateId: t.Optional(t.String()),
-        variables: t.Optional(t.Record(t.String(), t.String())),
+        variables: t.Optional(t.Union([t.String(), t.Record(t.String(), t.String())])),
         headers: t.Optional(t.Record(t.String(), t.String())),
         replyTo: t.Optional(t.String()),
         disableTracking: t.Optional(t.Boolean()),

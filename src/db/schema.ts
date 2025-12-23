@@ -1,4 +1,4 @@
-import { pgTable, varchar, timestamp, text, boolean, integer, decimal, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, timestamp, text, boolean, integer, decimal, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // ============================================
@@ -41,6 +41,7 @@ export const emailTemplate = pgTable('email_template', {
 	id: varchar('id', { length: 255 }).primaryKey(),
 	userId: varchar('user_id', { length: 255 }).notNull().references(() => user.id),
 	categoryId: varchar('category_id', { length: 255 }).references(() => emailTemplateCategory.id),
+	slug: varchar('slug', { length: 100 }), // User-defined identifier, unique per user
 	name: varchar('name', { length: 100 }).notNull(),
 	subject: varchar('subject', { length: 500 }).notNull(),
 	htmlContent: text('html_content').notNull(),
@@ -49,7 +50,9 @@ export const emailTemplate = pgTable('email_template', {
 	isActive: boolean('is_active').notNull().default(true),
 	createdAt: timestamp('created_at', { mode: 'date' }).notNull().$defaultFn(() => new Date()),
 	updatedAt: timestamp('updated_at', { mode: 'date' }).notNull().$defaultFn(() => new Date()).$onUpdate(() => new Date())
-});
+}, (table) => ({
+	userSlugIdx: uniqueIndex('email_template_user_slug_idx').on(table.userId, table.slug)
+}));
 
 export const emailTemplateVariable = pgTable('email_template_variable', {
 	id: varchar('id', { length: 255 }).primaryKey(),
