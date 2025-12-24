@@ -333,7 +333,8 @@ export const userRelations = relations(user, ({ many }) => ({
 	passwordResetTokens: many(passwordResetToken),
 	userBillings: many(userBilling),
 	notifications: many(notification),
-	emailQueues: many(emailQueue)
+	emailQueues: many(emailQueue),
+	emailSuppressions: many(emailSuppression)
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -642,3 +643,48 @@ export const notificationRelations = relations(notification, ({ one }) => ({
 
 export type Notification = typeof notification.$inferSelect;
 export type NewNotification = typeof notification.$inferInsert;
+
+// ============================================
+// Email Suppression Tables
+// ============================================
+
+export const suppressionReasonEnum = pgEnum('suppression_reason_enum', [
+	'hard_bounce',      // Permanent delivery failure
+	'soft_bounce',      // Temporary delivery failure (after retries)
+	'complaint',        // Spam complaint from recipient
+	'unsubscribe',      // Recipient unsubscribed
+	'manual'            // Manually added by user
+]);
+
+export const emailSuppression = pgTable('email_suppression', {
+	id: varchar('id', { length: 255 }).primaryKey(),
+	userId: varchar('user_id', { length: 255 }).notNull().references(() => user.id),
+	domainId: varchar('domain_id', { length: 255 }).references(() => domain.id), // Optional: domain-specific suppression
+	email: varchar('email', { length: 255 }).notNull(),
+	reason: suppressionReasonEnum('reason').notNull(),
+	sourceEventId: varchar('source_event_id', { length: 255 }), // Link to triggering event
+	metadata: text('metadata'), // JSON: bounce reason, complaint type, etc.
+	createdAt: timestamp('created_at', { mode: 'date' }).notNull().$defaultFn(() => new Date()),
+}, (table) => ({
+	userEmailIdx: uniqueIndex('email_suppression_user_email_idx').on(table.userId, table.email),
+	emailIdx: index('email_suppression_email_idx').on(table.email),
+	reasonIdx: index('email_suppression_reason_idx').on(table.reason),
+}));
+
+export const emailSuppressionRelations = relations(emailSuppression, ({ one }) => ({
+	user: one(user, {
+		fields: [emailSuppression.userId],
+		references: [user.id]
+	}),
+	domain: one(domain, {
+		fields: [emailSuppression.domainId],
+		references: [domain.id]
+	}),
+	sourceEvent: one(emailEvent, {
+		fields: [emailSuppression.sourceEventId],
+		references: [emailEvent.id]
+	})
+}));
+
+export type EmailSuppression = typeof emailSuppression.$inferSelect;
+export type NewEmailSuppression = typeof emailSuppression.$inferInsert;

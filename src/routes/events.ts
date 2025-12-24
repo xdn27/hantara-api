@@ -275,4 +275,155 @@ export const eventsRoute = new Elysia({ name: 'events-route' })
         tags: ['Events'],
       },
     }
+  )
+  // Record a new event (for webhooks, external notifications)
+  // Auto-suppresses for complaint, unsubscribed, and bounced events
+  .post(
+    '/events',
+    async ({ auth, body, set }) => {
+      if (!auth) {
+        set.status = 401;
+        return { error: 'Unauthorized', message: 'Authentication required' };
+      }
+
+      const { eventType, recipientEmail, messageId, metadata } = body;
+
+      // Validate event type
+      if (!EVENT_TYPES.includes(eventType as any)) {
+        set.status = 400;
+        return { error: 'Bad Request', message: `Invalid eventType. Must be one of: ${EVENT_TYPES.join(', ')}` };
+      }
+
+      const normalizedEmail = recipientEmail.toLowerCase().trim();
+
+      try {
+        // Generate event ID
+        const eventId = `evt_${Date.now().toString(36)}${Math.random().toString(36).substr(2, 8)}`;
+
+        // Insert the event
+        await db.insert(emailEvent).values({
+          id: eventId,
+          userId: auth.user.id,
+          messageId: messageId || `manual_${eventId}`,
+          eventType,
+          recipientEmail: normalizedEmail,
+          sendingDomain: auth.domain?.name || null,
+          metadata: metadata ? JSON.stringify(metadata) : null,
+        });
+
+        let suppressionResult = null;
+
+        // Auto-suppression logic for specific event types
+        if (eventType === 'complained') {
+          // Complaint: immediate permanent suppression
+          suppressionResult = await addToSuppressionInternal(
+            auth.user.id,
+            normalizedEmail,
+            'complaint',
+            eventId,
+            auth.domain?.id,
+            { ...metadata, autoSuppressed: true }
+          );
+        } else if (eventType === 'unsubscribed') {
+          // Unsubscribe: immediate permanent suppression
+          suppressionResult = await addToSuppressionInternal(
+            auth.user.id,
+            normalizedEmail,
+            'unsubscribe',
+            eventId,
+            auth.domain?.id,
+            { ...metadata, autoSuppressed: true }
+          );
+        } else if (eventType === 'bounced') {
+          // For bounced events, check if hard or soft
+          const bounceType = (metadata as any)?.bounceType || 'hard_bounce';
+          if (bounceType === 'soft_bounce') {
+            // Import and use handleSoftBounce from suppression
+            const { handleSoftBounce } = await import('./suppression');
+            suppressionResult = await handleSoftBounce(
+              auth.user.id,
+              normalizedEmail,
+              eventId,
+              auth.domain?.id,
+              metadata as any
+            );
+          } else {
+            suppressionResult = await addToSuppressionInternal(
+              auth.user.id,
+              normalizedEmail,
+              'hard_bounce',
+              eventId,
+              auth.domain?.id,
+              { ...metadata, autoSuppressed: true }
+            );
+          }
+        }
+
+        set.status = 201;
+        return {
+          success: true,
+          eventId,
+          eventType,
+          recipientEmail: normalizedEmail,
+          suppression: suppressionResult,
+        };
+      } catch (error: any) {
+        set.status = 500;
+        return { error: 'Internal Error', message: error.message || 'Failed to record event' };
+      }
+    },
+    {
+      body: t.Object({
+        eventType: t.String({ minLength: 1 }),
+        recipientEmail: t.String({ minLength: 1 }),
+        messageId: t.Optional(t.String()),
+        metadata: t.Optional(t.Record(t.String(), t.Unknown())),
+      }),
+      detail: {
+        summary: 'Record Email Event',
+        description: 'Record a new email event. Auto-suppresses for complaint, unsubscribed, and bounced events.',
+        tags: ['Events'],
+      },
+    }
   );
+
+// Helper function to add to suppression list
+async function addToSuppressionInternal(
+  userId: string,
+  email: string,
+  reason: string,
+  sourceEventId?: string,
+  domainId?: string,
+  metadata?: Record<string, unknown>
+): Promise<{ id: string; email: string; reason: string; alreadyExists: boolean }> {
+  const { emailSuppression } = await import('../db');
+  const { nanoid } = await import('nanoid');
+
+  const normalizedEmail = email.toLowerCase().trim();
+  
+  // Check if already exists
+  const existing = await db.query.emailSuppression.findFirst({
+    where: and(
+      eq(emailSuppression.userId, userId),
+      eq(emailSuppression.email, normalizedEmail)
+    )
+  });
+  
+  if (existing) {
+    return { id: existing.id, email: normalizedEmail, reason: existing.reason, alreadyExists: true };
+  }
+  
+  // Insert new suppression
+  const id = nanoid();
+  await db.insert(emailSuppression).values({
+    id,
+    userId,
+    domainId: domainId || null,
+    email: normalizedEmail,
+    reason,
+    sourceEventId: sourceEventId || null,
+    metadata: metadata ? JSON.stringify(metadata) : null,
+  });
+  
+  return { id, email: normalizedEmail, reason, alreadyExists: false };
+}

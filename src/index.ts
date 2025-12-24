@@ -3,6 +3,7 @@ import { cors } from '@elysiajs/cors';
 import { authMiddleware } from './middleware/auth';
 import { sendRoute } from './routes/send';
 import { eventsRoute } from './routes/events';
+import { suppressionRoute } from './routes/suppression';
 import { adminQueueRoute } from './routes/admin/queues';
 import { trackingRoute } from './routes/tracking';
 
@@ -27,6 +28,7 @@ const app = new Elysia()
       }))
       .use(sendRoute)
       .use(eventsRoute)
+      .use(suppressionRoute)
   )
   .listen(3001);
 

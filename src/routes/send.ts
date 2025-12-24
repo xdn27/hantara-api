@@ -5,6 +5,7 @@ import { db, emailEvent, userBilling, emailTrackingLink, emailTrackingOpen } fro
 import { authMiddleware, type AuthContext } from '../middleware/auth';
 import { addEmailJob, type EmailJobData } from '../queues';
 import { applyEmailTracking, type LinkTrackingData } from '../lib/tracking';
+import { checkSuppression } from './suppression';
 import { config } from '../config';
 
 // Email address regex for validation
@@ -188,6 +189,27 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         }
       }
 
+      // Check suppression list (checks both global and domain-specific suppression)
+      const suppressedEmails = await checkSuppression(
+        auth.user.id,
+        recipients.map(r => r.toLowerCase()),
+        auth.domain.id
+      );
+
+      // Filter out suppressed recipients
+      const validRecipients = recipients.filter(
+        r => !suppressedEmails.includes(r.toLowerCase())
+      );
+
+      if (validRecipients.length === 0) {
+        set.status = 400;
+        return {
+          error: 'All Recipients Suppressed',
+          message: 'All recipient emails are on the suppression list',
+          suppressedEmails,
+        };
+      }
+
       // Determine email content
       let emailSubject = subject;
       let emailHtml = html;
@@ -235,8 +257,8 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         emailHtml = trackingData.modifiedHtml;
       }
 
-      // Parse all recipient addresses
-      const recipientAddresses = recipients.map(r => r);
+      // Parse all recipient addresses (only valid, non-suppressed ones)
+      const recipientAddresses = validRecipients.map(r => r);
 
       // Create email event for each recipient (status: queued)
       const eventIds: string[] = [];
@@ -294,7 +316,7 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         await db
           .update(userBilling)
           .set({
-            emailUsed: sql`${userBilling.emailUsed} + ${recipients.length}`,
+            emailUsed: sql`${userBilling.emailUsed} + ${validRecipients.length}`,
           })
           .where(eq(userBilling.id, auth.billing.id));
       }
@@ -325,7 +347,8 @@ export const sendRoute = new Elysia({ name: 'send-route' })
         success: true,
         jobId,
         messageId,
-        recipients: recipients.length,
+        recipients: validRecipients.length,
+        suppressed: suppressedEmails.length > 0 ? suppressedEmails : undefined,
         status: 'queued',
       };
     },
